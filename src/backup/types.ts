@@ -11,11 +11,10 @@ export interface BotConfig {
   id: string;
   discordBotToken: string;
   inferUrl: string;
+  messageLimit: number;
+  replyTo?: string;
   apiKey?: string;
   sessionHeaderName?: string; 
-  messageLimit: number;
-  respondTo?: string;
-  respondAsReply: boolean;
   customFields?: Record<string, any>;
 }
 

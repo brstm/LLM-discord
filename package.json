@@ -1,7 +1,7 @@
 {
-  "name": "kindroid-discord",
+  "name": "llm-discord",
   "version": "1.0.1",
-  "description": "Multi-bot Discord manager for Kindroid AI personas with JIT message fetching",
+  "description": "Multi-bot Discord manager for LLMs with JIT message fetching",
   "main": "dist/index.js",
   "scripts": {
     "start": "npm run build && node dist/index.js",

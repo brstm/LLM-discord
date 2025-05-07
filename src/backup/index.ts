@@ -14,15 +14,12 @@ function loadBotConfig(id: string): BotConfig {
 
   return {
     id,
-	// Required parameters
     discordBotToken: process.env[`${prefix}DISCORD_BOT_TOKEN`]!,
     inferUrl: process.env[`${prefix}LLM_INFER_URL`]!,
-	// Optional parameters
     apiKey: process.env[`${prefix}LLM_API_KEY`]!,
-	messageLimit: Math.max(0, parseInt(process.env[`${prefix}CONVERSATION_LENGTH`] ?? '0', 10)),
+	replyTo: process.env[`${prefix}REPLY_TO`]?.toLowerCase(),
+    messageLimit: Math.max(1, parseInt(process.env[`${prefix}CONVERSATION_LENGTH`] || '1', 10)),
     sessionHeaderName: process.env[`${prefix}SESSION_HEADER`],
-	respondTo: process.env[`${prefix}RESPOND_TO`]?.toLowerCase(),
-	respondAsReply: process.env[`${prefix}RESPOND_AS_REPLY`] === 'true',
     customFields: (() => {
       try {
         const raw = process.env[`${prefix}CUSTOM_FIELDS_JSON`];

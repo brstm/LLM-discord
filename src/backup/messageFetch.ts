@@ -26,7 +26,7 @@ const DISPLAY_NAME_CACHE_DURATION = 60 * 60 * 1000; // 1 hour
  * @param guildId - Discord guild id (if available) for guild nickname
  * @returns The most appropriate display name
  */
-async function getDisplayName(userId: string, guildId?: string | null): Promise<string> {
+async function getUserDisplayName(userId: string, guildId?: string): Promise<string> {
   // Alias client for non-nullable access
   const client = getBotClient();
 
@@ -80,6 +80,7 @@ async function getDisplayName(userId: string, guildId?: string | null): Promise<
         }
       }
     }
+
     return displayName;
   } catch (error) {
     console.error("Error getting display name:", error);
@@ -91,30 +92,22 @@ async function getDisplayName(userId: string, guildId?: string | null): Promise<
 
 /**
  * Fetches conversation from Discord channel
- * @param message - The Discord message
- * @param limit - Number of messages to fetch before and including this message
+ * @param channel - The Discord channel to fetch from
+ * @param limit - Number of messages to fetch
  * @returns Array of formatted messages
  */
 async function fetchConversationFromDiscord(
-  message: Message,
-  limit: number
+  channel: TextChannel | DMChannel,
+  limit: number,
+  before?: string
 ): Promise<ConversationMessage[]> {
 	// Fetch messages from Discord
-	const client = message.client as Client;
-	const botId = client.user?.id;
-	const channel = message.channel;
-	const before = message.id;
-	const fetched = limit ? await channel.messages.fetch({ limit, before }) : null;
+	const fetched = await channel.messages.fetch({ limit, before });
 	
-	// Check if fetched exists, otherwise make sorted an empty array
-	const sorted = fetched
-		// Sort messages chronologically (oldest first)
-		? Array.from(fetched.values()).sort(
-			(a, b) => a.createdTimestamp - b.createdTimestamp)
-		: [];
-	 // If the message was from a user, include it
-	 if (message.author.id !== botId)
-		sorted.push(message);
+	// Sort messages chronologically (oldest first)
+	const sorted = Array.from(fetched.values()).sort(
+		(a, b) => a.createdTimestamp - b.createdTimestamp
+	 );
 
     // Pre-fetch display names for all users
 	const userIds = Array.from(new Set(sorted.map(msg => msg.author.id)));
@@ -122,7 +115,7 @@ async function fetchConversationFromDiscord(
 		? channel.guildId
 		: undefined;
 	const displayNames = await Promise.all(
-		userIds.map(userId => getDisplayName(userId, guildId))
+		userIds.map(userId => getUserDisplayName(userId, guildId))
 	);
 	const nameMap = new Map<string, string>(
 		userIds.map((userId, i) => [userId, displayNames[i]])
@@ -164,17 +157,17 @@ async function fetchConversationFromDiscord(
 
 /**
  * Fetches conversation with caching support
- * @param message - The Discord message
- * @param limit - Number of messages to fetch before and including this message
+ * @param channel - The Discord channel
+ * @param limit - Number of messages to fetch
  * @param cacheDurationMs - How long to cache messages
  */
 async function ephemeralFetchConversation(
-  message: Message,
+  channel: TextChannel | DMChannel,
   limit: number,
-  cacheDurationMs: number = 5000
+  cacheDurationMs: number = 5000,
+  before?: string
 ): Promise<ConversationMessage[]> {
   const now = Date.now();
-  const channel = message.channel;
   const cacheKey = channel.id;
   const cached = channelCache.get(cacheKey);
 
@@ -184,7 +177,7 @@ async function ephemeralFetchConversation(
   }
 
   // Fetch new data
-  const messages = await fetchConversationFromDiscord(message, limit);
+  const messages = await fetchConversationFromDiscord(channel, limit, before);
 
   // Update cache
   channelCache.set(cacheKey, {
@@ -206,4 +199,4 @@ async function ephemeralFetchConversation(
   return messages;
 }
 
-export { getDisplayName, ephemeralFetchConversation };
+export { getUserDisplayName, ephemeralFetchConversation };

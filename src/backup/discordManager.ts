@@ -14,7 +14,7 @@ import {
   PartialUser
 } from "discord.js";
 import type { MessageReactionEventDetails } from "discord.js";
-import { ephemeralFetchConversation, getDisplayName } from "./messageFetch";
+import { ephemeralFetchConversation, getUserDisplayName } from "./messageFetch";
 import { BotConfig, DMConversationCount } from "./types";
 import { callLLM } from "./llmAPI";
 
@@ -32,7 +32,7 @@ export function getBotClient(): Client {
   return _client;
 }
 
-// Inline guard stubs — replace with your actual implementations
+// Inline guard stubs � replace with your actual implementations
 function shouldAllowBotMessage(message: Message): boolean {
   return true;
 }
@@ -54,28 +54,27 @@ const dmConversationCounts = new Map<string, DMConversationCount>();
 
 // Fantasy-inspired emojis for thumbs-up responses
 const responseEmojis = [
-  "😎", // Smiley face with sunglasses
-  "🧙‍♂️", // Wizard
-  "🫡", // Saluting face
-  "🔮", // Crystal ball
-  "🪄", // Magic wand
-  "🧞", // Genie
-  "🦸", // Superhero
-  "✨", // Sparkles
-  "🤩"  // Star-struck face
+        "😎", // Smiley face with sunglasses
+        "🧙‍♂️", // Wizard
+        "🫡", // Saluting face
+        "🔮", // Crystal ball
+        "🪄", // Magic wand
+        "🧞", // Genie
+        "🦸", // Superhero
+        "✨", // Sparkles
+        "🤩"  // Star-struck face
 ];
 
 /**
  * Process an incoming message: fetch context, call LLM, and send reply.
  */
 async function handleMessageCreate(message: Message) {
-  const channel = message.channel;
   const client = message.client as Client;
-  const botConfig = client.botConfig!;
-  const botId = client.user!.id;
+  const channel = message.channel;
+  const botConfig = client.botConfig!
 
   if (message.author.bot) {
-	if (message.author.id === botId) return;
+	if (message.author.id === client.user?.id) return;
     if (!shouldAllowBotMessage(message)) return;
     else botToBotChains.delete(message.channel.id);
   }
@@ -84,86 +83,49 @@ async function handleMessageCreate(message: Message) {
   const shouldRespond = await shouldBotRespond(message);
   if (!shouldRespond) return;
   
-  // Determine if the bot should reply, or just respond normally
-  const respondAsReply =
-	// If the bot is set to always reply AND this isn't a DM
-	botConfig.respondAsReply
-	&& !(channel instanceof DMChannel)
-	// Or if the bot was explicitly mentioned
-	|| message.mentions.users.has(botId)
-	// And this is a DM, thread, or the bot responds to more than just mentions
-    && (channel instanceof DMChannel
+  // If the bot was @mentioned, reply the same way, unless the bot only ever responds to @mentions
+  const shouldPing =
+    (
+	channel instanceof DMChannel
 	|| channel instanceof ThreadChannel
-	|| botConfig.respondTo === "name"
-	|| botConfig.respondTo === "dynamic");
+	|| botConfig.replyTo === "name"
+	|| botConfig.replyTo === "dynamic"
+	)
+	&& message.mentions.users.has(client.user!.id);
   
-  await processConversation(message, respondAsReply);
+  await processConversation(message, shouldPing);
 }
 
 /**
  * Shared conversation processing and LLM call logic.
  */
-async function processConversation(message: Message, respondAsReply: Boolean) {
+async function processConversation(message: Message, shouldPing: Boolean) {
   const client = message.client as Client;
   const botConfig = client.botConfig!;
-  const botId = client.user!.id;  
   const channel = message.channel as TextChannel | DMChannel | BaseGuildTextChannel;
 
   const conversation = await ephemeralFetchConversation(
-    message,
+    channel as TextChannel | DMChannel,
     botConfig.messageLimit,
-    5000
+    5000,
+	//  message.id+1
   );
   
   await channel.sendTyping();
-  
-  // If the triggering message is a bot message, try to find the original user message
-  let userMessage: Message | null = null;
-  if (message.author.id !== botId) {
-    userMessage = message;
-  } else {
-	try {
-	  // If the message has a reference, use that
-      if (message.reference?.messageId) {
-        userMessage = channel.messages.cache.get(message.reference.messageId)
-          ?? await message.fetchReference().catch(() => null); // assign null if there was an error getting the reference
-      }
-	  // If the references was invalid or there is no reference, get the preceeding message
-      if (!userMessage) 
-		userMessage = (await channel.messages.fetch({ before: message.id, limit: 1 })).first()!;
-	  // If that doesn't work, we bail out.
-      if (!userMessage)
-		throw new Error("No user message found.");
-    } catch (err) {
-      console.error("Failed to fetch referenced or preceding message:", err);
-      return;
-    }
-  }
 
-  // Encode the session ID as bot, user, and channel
-  const sessionData = {
-	botId,
-    botName: await getDisplayName(botId, message.guildId),
-    userId: userMessage.author.id,
-    channelId: channel.isThread()
-      ? (channel as ThreadChannel).parentId!
-      : channel.id
-  };
-  const sessionId = Buffer
-    .from(JSON.stringify(sessionData))
-    .toString('base64');
+  const sessionId = channel instanceof DMChannel ? message.author.id : channel.id;
   const aiResult = await callLLM(botConfig, conversation, sessionId);
   if (aiResult.type === "rate_limited") return;
-
+	
   try {
-    if (respondAsReply) {
-      await userMessage.reply(aiResult.reply);
+    if (shouldPing) {
+      await message.reply(aiResult.reply);
     } else {
       await channel.send(aiResult.reply);
     }
   } catch (err) {
     console.error(`[Bot ${botConfig.id}] error sending reply:`, err);
-    await userMessage.reply(
+    await message.reply(
       "Beep boop, something went wrong. Please contact the owner."
     );
   }
@@ -177,7 +139,7 @@ async function shouldBotRespond(message: Message): Promise<boolean> {
   const botConfig = client.botConfig!;
   
   // If the bot responds dynamically, respond
-  if (botConfig.respondTo === "dynamic") return true;
+  if (botConfig.replyTo === "dynamic") return true;
   
   // If this is a DM or a thread with the bot, respond
   if (message.channel instanceof DMChannel 
@@ -191,7 +153,7 @@ async function shouldBotRespond(message: Message): Promise<boolean> {
   
   // If the bot responds to its name, respond if the name is in the message
   const guildId = message.guildId ?? undefined; 
-  const botDisplayName = await getDisplayName(botId, guildId);
+  const botDisplayName = await getUserDisplayName(botId, guildId);
   const textLower = message.content.toLowerCase();
   const nameReferenced = textLower.includes(botDisplayName.toLowerCase());
   if (nameReferenced) return true;
@@ -228,13 +190,10 @@ async function handleReactionAdd(
     }
   }
 
-  // Fully define our message now that we're sure we have one.
-  const message = reaction.message as Message;
   // Ensure the message author is the bot itself
-  const client = message.client as Client;
+  const client = reaction.message.client as Client;
   const botConfig = client.botConfig!;
-  const botId = client.user!.id;
-  if (!message.author || message.author.id !== botId) {
+  if (!reaction.message.author || reaction.message.author.id !== client.user?.id) {
     return; // Ignore reactions on messages not sent by the bot
   }
 
@@ -242,32 +201,18 @@ async function handleReactionAdd(
   const emojiName = reaction.emoji.name;
 
   if (emojiName === "👍") {
-	console.log("[ReactionAdd] Received thumbs up emoji.");
-    // Check if bot has already reacted
-    const botHasReacted = message.reactions.cache.some(reaction => 
-        reaction.users.cache.has(botId)
-    );
-    if (botHasReacted) {
-        console.log("[ReactionAdd] Bot has already reacted, skipping.");
-        return; // Exit early to avoid duplicate reactions
-    }
+    console.log(`[ReactionAdd] Received thumbs up emoji.`);
     const randomEmoji = responseEmojis[
       Math.floor(Math.random() * responseEmojis.length)
     ];
     try {
-      await message.react(randomEmoji);
+      await reaction.message.react(randomEmoji);
     } catch (err) {
       console.error("[ReactionAdd] Failed to add reaction:", err);
     }
   } else if (emojiName === "👎") {
-    console.log("[ReactionAdd] Received thumbs down emoji.");  
-    // Generate a new response as a direct reply and delete the original response.
-	try {
-		await processConversation(message, true);
-		message.delete();
-	} catch (err) {
-		console.error("[ReactionAdd] Failed to handle thumbs down reaction (process/delete):", err);
-    }
+      console.log(`[ReactionAdd] Received thumbs down emoji.`);
+    // Add any logic for thumbs down here if needed
   }
 }
 
@@ -287,8 +232,8 @@ export async function createDiscordClientForBot(
       GatewayIntentBits.DirectMessageReactions
     ],
     partials: [Partials.Channel, Partials.Message, Partials.Reaction],
-	// Do not allow mentions
-    allowedMentions: { parse: [], repliedUser: false }
+	// Only allow mentions when replying to user
+    allowedMentions: { parse: [], repliedUser: true }
   });
 
   client.once("ready", () => {
