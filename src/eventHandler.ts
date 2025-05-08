@@ -1,15 +1,10 @@
 import {
 	Client,
 	Message,
-	DMChannel,
-	ThreadChannel,
-	BaseGuildTextChannel,
-	PermissionFlagsBits,
-	MessageReactionEventDetails,
+	MessageType,
 	MessageReaction,
 	PartialMessageReaction,
-	User,
-	PartialUser,
+	PermissionFlagsBits,
 } from "discord.js";
 import { processConversation, getDisplayName } from "./responseOrchestrator";
 
@@ -22,19 +17,24 @@ interface BotConversationChain {
 const botToBotChains = new Map<string, BotConversationChain>();
 
 /**
- * Unified helper: decides if bot should process a message,
+ * Unified helper: decides if bot should respond to a message,
  * including loop prevention and permission checks.
  */
 async function shouldRespond(message: Message): Promise<boolean> {
 	const client = message.client as Client;
 	const botConfig = client.botConfig!;
 	const botId = client.user!.id;
+	const channel = message.channel;
 
-	// Bot-to-bot loop guard
+	// Only respond to standard messages
+	if (message.type !== MessageType.Default
+		&& message.type !== MessageType.Reply)
+		return false;
+
+	// Protect against bot loops
 	if (message.author.bot) {
 		if (message.author.id === botId) return false;
-		const channelId = message.channel.id;
-		const chain = botToBotChains.get(channelId) ?? { chainCount: 0, lastBotId: "", lastActivity: 0 };
+		const chain = botToBotChains.get(channel.id) ?? { chainCount: 0, lastBotId: "", lastActivity: 0 };
 		const now = Date.now();
 		if (now - chain.lastActivity > 600_000) {
 			chain.chainCount = 0;
@@ -43,95 +43,73 @@ async function shouldRespond(message: Message): Promise<boolean> {
 		if (chain.lastBotId && chain.lastBotId !== message.author.id) chain.chainCount++;
 		chain.lastBotId = message.author.id;
 		chain.lastActivity = now;
-		botToBotChains.set(channelId, chain);
+		botToBotChains.set(channel.id, chain);
 		if (chain.chainCount >= 3) return false;
 	}
 
-	// Permission guard (skip DM)
-	if (!(message.channel instanceof DMChannel)) {
-		const guildChannel = message.channel as BaseGuildTextChannel;
-		const perms = guildChannel.permissionsFor(client.user!);
+	// Check channel permissions, where appropriate
+	if (!channel.isDMBased()) {
+		const perms = channel.permissionsFor(client.user!);
 		if (!perms) return false;
 		const required = [
 			PermissionFlagsBits.ViewChannel,
 			PermissionFlagsBits.SendMessages,
 			PermissionFlagsBits.ReadMessageHistory,
-			...(guildChannel instanceof ThreadChannel
-				? [PermissionFlagsBits.SendMessagesInThreads]
-				: []),
 		];
 		if (!perms.has(required)) return false;
 	}
 
-	// Always-respond setting
-	if (botConfig.respondTo === "dynamic") return true;
-
-	// Check if this is a DM or thread
-	if (
-		message.channel instanceof DMChannel ||
-		message.channel instanceof ThreadChannel
-	) {
-		return true;
+	// If this is a thread, reply only if the bot is a member and has permissions
+	if (channel.isThread()) {
+		if (channel.sendable && channel.joined)
+			return true;
+		return false;
 	}
 
-	// Check if the bot was mentioned
-	if (message.mentions.users.has(botId)) return true;
+	// Always-respond when:
+	if (botConfig.respondTo === "dynamic"
+		|| channel.isDMBased()
+		|| message.mentions.users.has(botId)
+	) return true;
 
-	// Check if the message has the bot's display name
-	const displayName = (await getDisplayName(botId, message.guildId)).toLowerCase();
-	if (message.content.toLowerCase().includes(displayName)) return true;
+	// If the bot should reply to its name
+	if (botConfig.respondTo === "name") {
+		const displayName = (await getDisplayName(botId, message.guildId)).toLowerCase();
+		if (message.content.toLowerCase().includes(displayName)) return true;
+	}
 
 	return false;
 }
 
 /**
- * Entry: handle new message events
+ * Message handler: initiate response when appropriate
  */
 async function handleMessageCreate(message: Message) {
+	// Validate if the bot should respond to this message
 	if (!(await shouldRespond(message))) return;
-	// Ensure channel supports send/sendTyping
-	const channel = message.channel;
-	if (
-		!(channel instanceof DMChannel) &&
-		!(channel instanceof BaseGuildTextChannel)
-	)
-		return;
 
 	const client = message.client as Client;
 	const botConfig = client.botConfig!;
 	const botId = client.user!.id;
+	const channel = message.channel;
 
-	const isDMorThread =
-		channel instanceof DMChannel || channel instanceof ThreadChannel;
+	// Determine if the bot should reply, or just respond normally
 	const respondAsReply =
-		(botConfig.respondAsReply && !isDMorThread) ||
-		message.mentions.users.has(botId) ||
-		isDMorThread;
+		// If the bot was mentioned, always reply
+		message.mentions.users.has(botId)
+		// Otherwise, only reply if the bot is set to respondAsReply and this isn't a DM or thread
+		|| (botConfig.respondAsReply && !(channel.isDMBased() || channel.isThread()));
 
 	await processConversation(message, respondAsReply);
 }
-
-// Fantasy-inspired emojis for thumbs-up responses
-const responseEmojis = [
-	"😎",
-	"🧙‍♂️",
-	"🫡",
-	"🔮",
-	"🪄",
-	"🧞",
-	"🦸",
-	"✨",
-	"🤩",
-];
 
 /**
  * Reaction handler: add emoji or regenerate response on thumbs down
  */
 async function handleReactionAdd(
-	reaction: MessageReaction | PartialMessageReaction,
-	user: User | PartialUser,
-	_event: MessageReactionEventDetails
+	reaction: MessageReaction | PartialMessageReaction
 ): Promise<void> {
+	// Resolve partial reactions
 	if (reaction.partial) {
 		try {
 			reaction = await reaction.fetch();
@@ -147,10 +125,26 @@ async function handleReactionAdd(
 		}
 	}
 
+	// If we have a full reaction, proceed
 	const message = reaction.message as Message;
 	const client = message.client as Client;
 	const botConfig = client.botConfig!;
 	const botId = client.user!.id;
+	
+	// Fantasy-inspired emojis for thumbs-up responses
+	const responseEmojis = [
+		"😎",
+		"🧙‍♂️",
+		"🫡",
+		"🔮",
+		"🪄",
+		"🧞",
+		"🦸",
+		"✨",
+		"🤩",
+	];
+	
+	// Only process reactions on the bot's messages
 	if (!message.author || message.author.id !== botId) return;
 
 	const emojiName = reaction.emoji.name;

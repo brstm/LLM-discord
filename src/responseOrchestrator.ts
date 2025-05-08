@@ -1,11 +1,4 @@
-import {
-	Client,
-	Message,
-	TextChannel,
-	DMChannel,
-	BaseGuildTextChannel,
-	ThreadChannel
-} from "discord.js";
+import { Client, Message } from "discord.js";
 import { ConversationMessage } from "./types";
 import { getBotClient } from "./botManager";
 import { callLLM } from "./llmAPI";
@@ -29,74 +22,66 @@ const displayNameCache = new Map<string, DisplayNameCacheEntry>();
 const DISPLAY_NAME_CACHE_DURATION = 60 * 60 * 1000; // 1 hour
 
 /**
- * Gets the display name for a message author with proper member fetching
- * @param userId - Discord user id
- * @param guildId - Discord guild id (if available) for guild nickname
- * @returns The most appropriate display name
+ * Gets the display name for a user, preferring guild nicknames when in a guild
+ * @param userId - Discord user ID
+ * @param guildId - Optional Discord guild ID for nickname lookup
+ * @returns The most appropriate display name for the user
  */
-async function getDisplayName(userId: string, guildId?: string | null): Promise<string> {
-	// Alias client for non-nullable access
+async function getDisplayName(
+	userId: string,
+	guildId?: string | null
+  ): Promise<string> {
 	const client = getBotClient();
-
-	// Create a cache key which is guild-specific if provided
 	const cacheKey = guildId ? `${guildId}:${userId}` : userId;
 	const now = Date.now();
 	const cached = displayNameCache.get(cacheKey);
-
-	// Return cached name if still valid
+  
+	// Return cached value if fresh
 	if (cached && now - cached.lastFetchTime < DISPLAY_NAME_CACHE_DURATION) {
-		return cached.displayName;
+	  return cached.displayName;
 	}
-
-	let displayName: string;
-
+  
 	try {
-		if (guildId) {
-			// Attempt to get the guild from the cache
-			const guild = client.guilds.cache.get(guildId);
-			if (!guild) {
-				throw new Error("Guild not found in cache");
-			}
-
-			// Fetch the member information in this guild
-			const member = await guild.members.fetch(userId);
-			if (member.nickname) {
-				displayName = member.nickname;
-			} else {
-				// Fallback to global user info
-				const user = await client.users.fetch(userId);
-				displayName = user.globalName || user.username;
-			}
-		} else {
-			// Fetch global user info when no guild provided
-			const user = await client.users.fetch(userId);
-			displayName = user.globalName || user.username;
+	  // Always fetch the User object once
+	  const user = await client.users.fetch(userId);
+	  let displayName: string;
+  
+	  if (guildId) {
+		// Ensure guild is available (cache or fetch)
+		const guild =
+		  client.guilds.cache.get(guildId) ??
+		  (await client.guilds.fetch(guildId));
+		const member = await guild.members.fetch(userId);
+		// Prefer nickname, then globalName, then username
+		displayName = member.nickname ?? user.globalName ?? user.username;
+	  } else {
+		// No guild context: use globalName or username
+		displayName = user.globalName ?? user.username;
+	  }
+  
+	  // Cache the result
+	  displayNameCache.set(cacheKey, { displayName, lastFetchTime: now });
+  
+	  // Prune cache if too big
+	  if (displayNameCache.size > 1000) {
+		const expiry = now - DISPLAY_NAME_CACHE_DURATION;
+		for (const [key, entry] of displayNameCache.entries()) {
+		  if (entry.lastFetchTime < expiry) {
+			displayNameCache.delete(key);
+		  }
 		}
-
-		// Update the cache with the fetched displayName
-		displayNameCache.set(cacheKey, {
-			displayName,
-			lastFetchTime: now
-		});
-
-		// Prune old cache entries if the cache grows too large
-		if (displayNameCache.size > 1000) {
-			const oldestAllowed = now - DISPLAY_NAME_CACHE_DURATION;
-			for (const [key, value] of displayNameCache.entries()) {
-				if (value.lastFetchTime < oldestAllowed) {
-					displayNameCache.delete(key);
-				}
-			}
-		}
-		return displayName;
+	  }
+  
+	  return displayName;
 	} catch (error) {
-		console.error("Error getting display name:", error);
-		// If an error occurs, try one final time to retrieve the global username
-		const user = await client.users.fetch(userId);
-		return user.globalName || user.username;
+		const e = error as Error;
+	  console.warn("Could not get display name, falling back to username.", e.name, e.message);
+	  // Final fallback: fetch user and return name
+	  const user = await client.users.fetch(userId);
+	  return user.globalName ?? user.username;
 	}
-}
-
+  }
+ 
 /**
  * Fetches conversation from Discord channel
  * @param message - The Discord message
@@ -126,9 +111,7 @@ async function fetchConversationFromDiscord(
 
 	// Pre-fetch display names for all users
 	const userIds = Array.from(new Set(sorted.map(msg => msg.author.id)));
-	const guildId = channel instanceof TextChannel
-		? channel.guildId
-		: undefined;
+	const guildId = !channel.isDMBased() ? channel.guildId : undefined;
 	const displayNames = await Promise.all(
 		userIds.map(userId => getDisplayName(userId, guildId))
 	);
@@ -158,11 +141,11 @@ async function fetchConversationFromDiscord(
 	}));
 
 	// If there's a channel topic, include it at the top as additional context	
-	if (channel instanceof TextChannel && channel.topic) {
+	if (('topic' in channel) && channel.topic) {
 		messages.unshift({
 			timestamp: new Date().toISOString(),
 			username: "Channel Topic",
-			text: channel.topic,
+			text: (channel as any).topic,
 		});
 	}
 
@@ -218,18 +201,24 @@ async function ephemeralFetchConversation(
  * Shared conversation processing and LLM call logic.
  */
 async function processConversation(message: Message, respondAsReply: Boolean) {
+	if (!message.channel.isSendable()) return;
+		
 	const client = message.client as Client;
 	const botConfig = client.botConfig!;
 	const botId = client.user!.id;
-	const channel = message.channel as TextChannel | DMChannel | BaseGuildTextChannel;
-
+	const channel = message.channel;
+	
 	const conversation = await ephemeralFetchConversation(
 		message,
-		botConfig.messageLimit,
+		botConfig.convLength,
 		5000
 	);
 
+	// Show typing and refresh every 8 seconds
 	await channel.sendTyping();
+	const typingInterval = setInterval(() => {
+	channel.sendTyping().catch(console.error);
+	}, 8000);
 
 	// If the triggering message is a bot message, try to find the original user message
 	let userMessage: Message | null = null;
@@ -260,7 +249,7 @@ async function processConversation(message: Message, respondAsReply: Boolean) {
 		botName: await getDisplayName(botId, message.guildId),
 		userId: userMessage.author.id,
 		channelId: channel.isThread()
-			? (channel as ThreadChannel).parentId!
+			? channel.parentId
 			: channel.id
 	};
 	const sessionId = Buffer
@@ -280,6 +269,8 @@ async function processConversation(message: Message, respondAsReply: Boolean) {
 		await userMessage.reply(
 			"Beep boop, something went wrong. Please contact the owner."
 		);
+	} finally {
+		clearInterval(typingInterval);	
 	}
 }
 

@@ -53,9 +53,9 @@ export async function callLLM(
 			throw new Error("Conversation array cannot be empty");
 		}
 
-		// If conversation is only a single message, send that text as 'message'.
-		// Otherwise send the whole conversation.
-		const requestBody = conversation.length === 1
+		// If this bot is set for no conversation history, send just a single message as 'message'
+		// Otherwise send the whole conversation
+		const requestBody = !botConfig.convLength
 			? { message: conversation[0].text, ...botConfig.customFields }
 			: { conversation, ...botConfig.customFields };
 

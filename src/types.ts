@@ -1,4 +1,4 @@
-import { MessageOptions } from "discord.js";
+import { BaseMessageOptions } from "discord.js";
 
 declare module "discord.js" {
 	interface Client {
@@ -13,7 +13,7 @@ export interface BotConfig {
 	inferUrl: string;
 	apiKey?: string;
 	sessionHeaderName?: string;
-	messageLimit: number;
+	convLength: number;
 	respondTo?: string;
 	respondAsReply: boolean;
 	customFields?: Record<string, any>;
@@ -27,7 +27,7 @@ export interface ConversationMessage {
 
 export interface LLMResponse {
 	success: boolean;
-	reply: string | MessageOptions;
+	reply: string | BaseMessageOptions;
 	stop_reason?: string | null;
 	error?: string;
 }
@@ -40,7 +40,7 @@ export interface DMConversationCount {
 export type LLMResult =
 	| {
 		type: "success";
-		reply: MessageOptions;
+		reply: BaseMessageOptions;
 	}
 	| {
 		type: "rate_limited";
