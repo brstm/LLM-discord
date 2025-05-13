@@ -59,6 +59,17 @@ async function shouldRespond(message: Message): Promise<boolean> {
 		if (!perms.has(required)) return false;
 	}
 
+	// Check if there are non-bot mentions in the thread
+	// If the bot is not also mentioned, ignore the message
+	const { users, roles, channels, everyone } = message.mentions;
+	const hasAnyMention =
+		everyone ||
+		users.size > 0 ||
+		roles.size > 0 ||
+		channels.size > 0;
+	const isBotMentioned = users.has(botId);
+	if (hasAnyMention && !isBotMentioned) return false;
+
 	// If this is a thread, reply only if the bot is a member and has permissions
 	if (channel.isThread()) {
 		if (channel.sendable && channel.joined)
@@ -69,7 +80,7 @@ async function shouldRespond(message: Message): Promise<boolean> {
 	// Always-respond when:
 	if (botConfig.respondTo === "dynamic"
 		|| channel.isDMBased()
-		|| message.mentions.users.has(botId)
+		|| isBotMentioned
 	) return true;
 
 	// If the bot should reply to its name
