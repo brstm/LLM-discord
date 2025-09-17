@@ -261,18 +261,7 @@ async function processConversation(message: Message, respondAsReply: Boolean) {
 				: channel.id
 		}
 	};
-	/*
-	const sessionData = {
-		botId,
-		botName: await getDisplayName(botId, message.guildId),
-		userId: userMessage.author.id,
-		username: userMessage.author.username,
-		globalName: userMessage.author.globalName,
-		channelId: channel.isThread()
-			? channel.parentId
-			: channel.id
-	};
-	*/
+
 	const sessionId = Buffer
 		.from(JSON.stringify(sessionData))
 		.toString('base64');
