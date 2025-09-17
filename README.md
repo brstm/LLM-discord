@@ -16,17 +16,18 @@ LLM Discord Bot Manager is a TypeScript service for running one or more Discord 
 
 ## What's different from Kindroid-discord
 
-This fork is for teams running more than one Discord AI bot, wanting freedom to use any LLM backend, and wanting better, safer context. Highlights:
+This fork is for people who want to run more than one Discord AI bot, use any LLM backend (not just Kindroid), and give the model better context. Highlights:
 
-- Multi‑bot manager: run many bots in one process; add `<ID>_DISCORD_BOT_TOKEN` per bot (IDs can be numbers or names).
-- Provider‑agnostic LLMs: point to any HTTP endpoint or a local model server; same payload format.
+- Channel topic in context: the channel topic (when present) is sent first so answers match the room’s purpose.
+- Thread‑aware behavior: replies in threads just like in DMs without needing to mention the bot by name.
+- You control the voice: `respondTo=dynamic|name` and `respondAsReply=true|false` let you pick when and how it talks.
+- Control chat history: configurable chat history length to send to the LLM for context.
+- Smarter replies: control whether the bot responds as a normal message in channels or DMs, instead of a reply.
+- Multi‑bot manager: run many bots in one process; just add `<ID>_DISCORD_BOT_TOKEN` per bot (IDs can be numbers or names).
+- Provider‑agnostic LLMs: point to any HTTP endpoint or local server; same payload format.
 - Kindroid made easy: drop‑in examples for `discord-bot` and `send-message`, including `CUSTOM_FIELDS_JSON`.
-- Channel topic in context: if set, the channel topic is sent first so answers match the room’s purpose.
-- Thread‑aware behavior: responds inside threads it already has access to; doesn’t auto‑join. No @mention needed in threads; session IDs use the parent channel for continuity.
-- Control chat history: choose how many recent messages to send (0 = only the latest).
-- You control the voice: `respondTo=dynamic|name` and `respondAsReply=true|false` let you pick when and how it talks; replies are only forced in standard channels.
 - Clearer names: mention IDs like `<@123>` become readable display names; names are cached for speed.
-- Faster and lighter: a small 5s cache reduces duplicate fetches while keeping context fresh.
+- Faster and lighter: a tiny 5s cache reduces duplicate fetches while keeping context fresh.
 - Safer defaults: permission checks, loop prevention, and `allowedMentions` that avoid mass pings.
 - Flexible responses: accepts simple strings or full Discord message objects; gracefully backs off on HTTP 429.
 - Optional session header: send a base64 session id (bot, user, channel) in a header your API can read.
@@ -157,9 +158,6 @@ src/
 ## License
 
 Released under the MIT License (see `LICENSE`).
-
-
-
 
 
 
