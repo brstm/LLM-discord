@@ -245,13 +245,34 @@ async function processConversation(message: Message, respondAsReply: Boolean) {
 
 	// Encode the session ID as bot, user, and channel
 	const sessionData = {
+		platform: "Discord",
+		bot: {
+			id: botId,
+			name: await getDisplayName(botId, message.guildId)
+		},
+		user: {
+			id: userMessage.author.id,
+			name: userMessage.author.username,
+			globalName: userMessage.author.globalName
+		},
+		channel: {
+			id: channel.isThread()
+				? channel.parentId
+				: channel.id
+		}
+	};
+	/*
+	const sessionData = {
 		botId,
 		botName: await getDisplayName(botId, message.guildId),
 		userId: userMessage.author.id,
+		username: userMessage.author.username,
+		globalName: userMessage.author.globalName,
 		channelId: channel.isThread()
 			? channel.parentId
 			: channel.id
 	};
+	*/
 	const sessionId = Buffer
 		.from(JSON.stringify(sessionData))
 		.toString('base64');
